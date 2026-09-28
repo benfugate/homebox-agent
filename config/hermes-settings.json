@@ -1,0 +1,28 @@
+{
+  "model": "sonnet",
+  "discord": {
+    "token": "",
+    "allowedUserIds": [],
+    "listenChannels": [],
+    "listenGuilds": []
+  },
+  "telegram": {
+    "token": "",
+    "allowedUserIds": []
+  },
+  "security": {
+    "level": "strict",
+    "allowedTools": [],
+    "disallowedTools": [
+      "Write",
+      "Edit",
+      "NotebookEdit"
+    ]
+  },
+  "memory": {
+    "dreamCron": false
+  },
+  "learning": {
+    "captureCandidateSkills": false
+  }
+}

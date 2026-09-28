@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Base image: ghcr.io/benfugate/claude-hermes-container:latest, pinned by digest.
+  # When that repo publishes a new image, this opens a digest bump, which ci.yml
+  # auto-merges and publish.yml rebuilds.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # MCP SDK and httpx. Not auto-merged: an SDK change can alter how tools are
+  # described to the model, so run tests/test_live.py before merging.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1

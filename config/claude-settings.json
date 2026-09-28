@@ -1,0 +1,4 @@
+{
+  "enabledMcpjsonServers": ["homebox"],
+  "skipDangerousModePermissionPrompt": true
+}

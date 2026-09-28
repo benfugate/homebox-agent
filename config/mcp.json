@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "homebox": {
+      "type": "stdio",
+      "command": "/opt/homebox-agent/.venv/bin/python",
+      "args": ["/opt/homebox-agent/homebox_mcp.py"],
+      "env": {
+        "HOMEBOX_URL": "${HOMEBOX_URL}",
+        "HOMEBOX_API_KEY": "${HOMEBOX_API_KEY}"
+      }
+    }
+  }
+}

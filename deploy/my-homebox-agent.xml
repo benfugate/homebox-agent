@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>homebox-agent</Name>
+  <Repository>ghcr.io/benfugate/homebox-agent:latest</Repository>
+  <Registry>https://github.com/benfugate/homebox-agent/pkgs/container/homebox-agent</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <MyMAC/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/benfugate/homebox-agent/issues</Support>
+  <Project>https://github.com/sypsyp97/claude-hermes</Project>
+  <ReadMe>https://github.com/benfugate/homebox-agent</ReadMe>
+  <Overview>Household inventory agent: claude-hermes on Discord with only Homebox tools. Security level strict, no SSH keys, no shell, web or file-writing tools. Source: https://github.com/benfugate/homebox-agent</Overview>
+  <Category>AI:</Category>
+  <WebUI/>
+  <TemplateURL/>
+  <Icon>https://cdn.jsdelivr.net/gh/selfhst/icons/png/homebox.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>A Claude Code subscription. After first start, open a container terminal and run: claude, then /login</Requires>
+  <Config Name="App Data" Target="/root/.claude" Default="/mnt/user/appdata/homebox-agent" Mode="rw" Description="Claude Code login, hermes settings (Discord token and IDs in hermes/settings.json), state and logs." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/homebox-agent</Config>
+  <Config Name="HOMEBOX_URL" Target="HOMEBOX_URL" Default="" Mode="" Description="Homebox base URL as reachable from this container, e.g. http://192.0.2.10:3100" Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="HOMEBOX_API_KEY" Target="HOMEBOX_API_KEY" Default="" Mode="" Description="Homebox API key (Profile, API keys)." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="IS_SANDBOX" Target="IS_SANDBOX" Default="1" Mode="" Description="Lets Claude Code accept --dangerously-skip-permissions as root. Required." Type="Variable" Display="advanced" Required="true" Mask="false">1</Config>
+</Container>
