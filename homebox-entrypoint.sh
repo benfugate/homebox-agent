@@ -1,33 +1,29 @@
 #!/bin/bash
-# Prepares the /root/.claude volume, then hands off to the claude-hermes entrypoint.
 set -e
 
 AGENT=/opt/homebox-agent
 STATE=/root/.claude
 
 mkdir -p "$STATE/hermes"
-
-# /root/.claude is a bind mount, so anything the image put there would be hidden.
-# Copy the instructions in on every start so an image update always takes effect.
 install -m 644 "$AGENT/CLAUDE.md" "$STATE/CLAUDE.md"
 
-# Approve the homebox MCP server. Merged, because hermes adds its own statusLine key.
+days=${TRANSCRIPT_RETENTION_DAYS:-365}
+# 0 would stop Claude Code saving sessions, which hermes needs to resume conversations.
+if ! [[ "$days" =~ ^[0-9]+$ ]] || [ "$days" -lt 1 ]; then
+    echo "[homebox-agent] TRANSCRIPT_RETENTION_DAYS=$days is not a whole number of days >= 1; using 365"
+    days=365
+fi
 settings="$STATE/settings.json"
 [ -s "$settings" ] || echo '{}' > "$settings"
-jq -s '.[0] * .[1]' "$settings" "$AGENT/claude-settings.json" > "$settings.new"
+jq -s --argjson days "$days" '.[0] * .[1] * {cleanupPeriodDays: $days}' \
+    "$settings" "$AGENT/claude-settings.json" > "$settings.new"
 mv "$settings.new" "$settings"
 
-# Hermes settings hold the Discord token and IDs, so they are only seeded, never
-# overwritten. Seeding here also keeps the base entrypoint from writing its own
-# default (Opus, no restrictions).
 if [ ! -f "$STATE/hermes/settings.json" ]; then
     install -m 600 "$AGENT/hermes-settings.json" "$STATE/hermes/settings.json"
 fi
 
-# hermes refuses to start while daemon.pid names a live process, and inside a
-# container the recorded PID is always 1: this very process. After an unclean
-# stop the file is left behind and the container crash-loops, so remove it.
-# Nothing else can be running in a container that is only now starting.
+# A pid file left by an unclean stop always says 1, which is this process, so hermes would refuse to start.
 rm -f "$STATE/hermes/daemon.pid"
 
 exec /entrypoint.sh "$@"

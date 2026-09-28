@@ -1,7 +1,5 @@
 name: CI
 
-# Validation only. Pushes to main are covered by publish.yml, which builds and
-# tests before it pushes; running this on push too would build everything twice.
 on:
   pull_request:
     branches: ["main"]
@@ -33,9 +31,6 @@ jobs:
             homebox-agent:test /tests/test_offline.py
 
   automerge:
-    # Base-image digest bumps only. claude-hermes-container's own upstream bumps are
-    # reviewed by hand in that repo before they reach this base, so these are safe
-    # to take automatically. requirements.txt and action bumps are merged by hand.
     if: github.actor == 'dependabot[bot]'
     needs: build
     runs-on: ubuntu-latest
@@ -62,8 +57,7 @@ jobs:
         if: steps.meta.outputs.package-ecosystem == 'docker'
         uses: peter-evans/enable-pull-request-automerge@a660677d5469627102a1c1e11409dd063606628d # v3
         with:
-          # A PAT, not GITHUB_TOKEN: merges made with GITHUB_TOKEN do not trigger
-          # downstream workflows, so publish.yml would never fire on the merge.
+          # Merges made with GITHUB_TOKEN don't trigger publish.yml.
           token: ${{ secrets.MERGE_GITHUB_TOKEN }}
           pull-request-number: ${{ github.event.pull_request.number }}
           merge-method: squash

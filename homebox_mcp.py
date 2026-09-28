@@ -1,14 +1,15 @@
-"""Homebox tools for the inventory agent, served over MCP stdio.
+"""Homebox tools for the inventory agent, served over MCP stdio."""
 
-Targets the Homebox 0.26 entities API, where items and locations are both
-"entities" and a location is an entity whose type has isLocation=true.
-Configured by HOMEBOX_URL (e.g. http://homebox:7745) and HOMEBOX_API_KEY.
-"""
-
+import functools
+import inspect
+import json
 import logging
 import mimetypes
 import os
+import sys
+import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -28,8 +29,66 @@ taken from earlier tool output; never invent them."""
 
 mcp = MCPServer("homebox", instructions=INSTRUCTIONS)
 
-# httpx logs every request at INFO, which buries real errors in the agent logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+LOG_MODE = os.environ.get("AGENT_LOG_MODE", "changes").strip().lower()
+if LOG_MODE not in ("off", "changes", "verbose"):
+    print(f"homebox-agent: unknown AGENT_LOG_MODE {LOG_MODE!r}, using 'changes'", file=sys.stderr)
+    LOG_MODE = "changes"
+FEEDBACK_ON = os.environ.get("AGENT_FEEDBACK", "on").strip().lower() not in ("off", "false", "0", "no")
+LOG_DIR = Path(os.environ.get("AGENT_LOG_DIR", "/root/.claude/homebox-agent"))
+LOG_MAX_BYTES = 5 * 1024 * 1024
+MUTATING = {"create_location", "add_items", "update_item", "move", "delete", "attach_photo"}
+
+
+def _now() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _jsonable(obj):
+    return obj.model_dump() if hasattr(obj, "model_dump") else str(obj)
+
+
+def _append(name: str, record: dict) -> None:
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        path = LOG_DIR / name
+        if path.exists() and path.stat().st_size > LOG_MAX_BYTES:
+            path.replace(path.with_name(f"{name}.1"))
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False, default=_jsonable) + "\n")
+    except Exception as e:  # noqa: BLE001
+        print(f"homebox-agent: could not write {name}: {e}", file=sys.stderr)
+
+
+def audited(fn):
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        start = time.monotonic()
+        ok, result = True, ""
+        try:
+            result = fn(*args, **kwargs)
+            return result
+        except Exception as e:
+            ok, result = False, str(e)
+            raise
+        finally:
+            if LOG_MODE == "verbose" or (LOG_MODE == "changes" and (fn.__name__ in MUTATING or not ok)):
+                limit = 20_000 if LOG_MODE == "verbose" else 2_000
+                text = result if isinstance(result, str) else json.dumps(result, default=_jsonable)
+                _append("audit.jsonl", {
+                    "ts": _now(),
+                    "tool": fn.__name__,
+                    "args": {k: v for k, v in sig.bind_partial(*args, **kwargs).arguments.items() if v is not None},
+                    "ok": ok,
+                    "ms": round((time.monotonic() - start) * 1000),
+                    "result": text if len(text) <= limit else text[:limit] + " [truncated]",
+                })
+
+    return wrapper
+
 
 _http: httpx.Client | None = None
 
@@ -66,12 +125,7 @@ def _check_id(value: str, what: str = "id") -> str:
         raise ToolError(f"{what} {value!r} is not a valid Homebox ID") from None
 
 
-# --- inventory snapshot -------------------------------------------------------
-
-
 class _Snapshot:
-    """Locations and items fetched once per tool call, with full paths."""
-
     def __init__(self) -> None:
         self.loc_name: dict[str, str] = {}
         self.loc_parent: dict[str, str | None] = {}
@@ -145,10 +199,8 @@ def _item_line(snap: _Snapshot, it: dict) -> str:
     return f"- {it['name']}{_qty(it.get('quantity'))}{desc} in {where} [id {it['id']}]"
 
 
-# --- tools --------------------------------------------------------------------
-
-
 @mcp.tool()
+@audited
 def list_locations() -> str:
     """Show every location as an indented tree with item counts and IDs.
 
@@ -169,6 +221,7 @@ def list_locations() -> str:
 
 
 @mcp.tool()
+@audited
 def find_items(query: str, limit: int = 25) -> str:
     """Search items (name, description, notes, serial...) and location names.
 
@@ -193,6 +246,7 @@ def find_items(query: str, limit: int = 25) -> str:
 
 
 @mcp.tool()
+@audited
 def location_contents(location_id: str, include_nested: bool = True) -> str:
     """List what is inside a location: its items and, by default, everything in
     the locations nested under it."""
@@ -215,10 +269,14 @@ def location_contents(location_id: str, include_nested: bool = True) -> str:
 
 
 @mcp.tool()
+@audited
 def get_details(entity_id: str) -> str:
     """Full details for one item or location: path, quantity, description,
     notes, tags and attachment count."""
-    eid = _check_id(entity_id, "entity_id")
+    return _details(_check_id(entity_id, "entity_id"))
+
+
+def _details(eid: str) -> str:
     e = _api("GET", f"/entities/{eid}")
     path = SEP.join(p["name"] for p in _api("GET", f"/entities/{eid}/path") or [])
     kind = "location" if (e.get("entityType") or {}).get("isLocation") else "item"
@@ -236,6 +294,7 @@ def get_details(entity_id: str) -> str:
 
 
 @mcp.tool()
+@audited
 def create_location(name: str, parent_id: str | None = None, description: str = "") -> str:
     """Create a location, optionally inside another one (a bin inside the attic,
     a shelf inside the garage). Leave parent_id empty for a top-level room.
@@ -265,6 +324,7 @@ class NewItem(BaseModel):
 
 
 @mcp.tool()
+@audited
 def add_items(location_id: str, items: list[NewItem]) -> str:
     """Add one or more items to a location.
 
@@ -297,8 +357,7 @@ def add_items(location_id: str, items: list[NewItem]) -> str:
     return "\n".join(out)
 
 
-# EntityUpdate is a full replace, so every field is copied from the current
-# entity before applying changes; anything left out would be cleared.
+# PUT replaces the whole entity, so every current field has to be sent back.
 _UPDATE_FIELDS = (
     "archived", "assetId", "description", "insured", "lifetimeWarranty", "manufacturer",
     "modelNumber", "name", "notes", "purchaseDate", "purchaseFrom", "purchasePrice",
@@ -308,6 +367,7 @@ _UPDATE_FIELDS = (
 
 
 @mcp.tool()
+@audited
 def update_item(
     item_id: str,
     name: str | None = None,
@@ -339,10 +399,11 @@ def update_item(
             if val is not None:
                 body[key] = val.strip() if isinstance(val, str) else val
         _api("PUT", f"/entities/{iid}", json={k: v for k, v in body.items() if v is not None})
-    return "Updated:\n" + get_details(iid)
+    return "Updated:\n" + _details(iid)
 
 
 @mcp.tool()
+@audited
 def move(entity_ids: list[str], new_location_id: str) -> str:
     """Move items or whole locations (e.g. a bin with everything in it) into
     another location."""
@@ -366,6 +427,7 @@ def move(entity_ids: list[str], new_location_id: str) -> str:
 
 
 @mcp.tool()
+@audited
 def delete(entity_id: str) -> str:
     """Delete an item, or a location that is already empty. Locations that
     still hold items or other locations are refused; move or delete their
@@ -387,6 +449,7 @@ def delete(entity_id: str) -> str:
 
 
 @mcp.tool()
+@audited
 def attach_photo(entity_id: str, file_path: str, primary: bool = True) -> str:
     """Attach an image file (e.g. a photo sent in chat) to an item or location.
     primary=True makes it the thumbnail shown in Homebox."""
@@ -405,6 +468,26 @@ def attach_photo(entity_id: str, file_path: str, primary: bool = True) -> str:
             data={"type": "photo", "primary": "true" if primary else "false", "name": p.name},
         )
     return f"Attached {p.name}" + (" as the main photo" if primary else "")
+
+
+def record_feedback(what_was_asked: str, what_went_wrong: str, correction: str = "") -> str:
+    """Note a mistake so the agent can be improved later. Call it when someone
+    corrects you or says a result was wrong, when you had to guess or ask because
+    a request was ambiguous, or when a tool failed in a way you couldn't work
+    around. Quote their words where you can. No need to mention it in your reply."""
+    if not what_was_asked.strip() or not what_went_wrong.strip():
+        raise ToolError("what_was_asked and what_went_wrong are both required")
+    _append("feedback.jsonl", {
+        "ts": _now(),
+        "asked": what_was_asked.strip(),
+        "wrong": what_went_wrong.strip(),
+        "correction": correction.strip(),
+    })
+    return "Noted."
+
+
+if FEEDBACK_ON:
+    mcp.tool()(audited(record_feedback))
 
 
 if __name__ == "__main__":

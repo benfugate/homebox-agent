@@ -58,6 +58,23 @@ After the first start:
 Model, security level and Discord settings live in that file and are never
 overwritten by image updates. `CLAUDE.md` is replaced on every start.
 
+## Logging
+
+Everything is written to the `/root/.claude` volume, controlled by environment variables:
+
+| Variable | Default | |
+|---|---|---|
+| `AGENT_LOG_MODE` | `changes` | What `homebox-agent/audit.jsonl` records. `changes`: every call that modifies Homebox, plus any call that fails, which is a small audit trail. `verbose`: every call, reads included, with fuller results, for development. `off`: nothing. |
+| `AGENT_FEEDBACK` | `on` | Gives the agent a `record_feedback` tool, which it uses when someone corrects it, when it had to guess, or when a tool failed; entries go to `homebox-agent/feedback.jsonl`. `off` removes the tool. |
+| `TRANSCRIPT_RETENTION_DAYS` | `365` | How long Claude Code keeps full session transcripts (`projects/`), including every tool call and result. Claude Code's own default is 30. |
+
+Both `.jsonl` files keep one JSON object per line and rotate at 5 MB, keeping one
+previous file (`.1`). The Discord side of each conversation is also in hermes's
+`hermes/state.db` (`messages` table).
+
+`deploy/logs.sh` prints them from the Unraid host: `deploy/logs.sh` (audit),
+`deploy/logs.sh feedback`, or `deploy/logs.sh audit 50 raw`.
+
 ## Pipeline
 
 - `publish.yml` builds on every push to `main`, runs the offline tests inside the

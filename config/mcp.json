@@ -6,7 +6,10 @@
       "args": ["/opt/homebox-agent/homebox_mcp.py"],
       "env": {
         "HOMEBOX_URL": "${HOMEBOX_URL}",
-        "HOMEBOX_API_KEY": "${HOMEBOX_API_KEY}"
+        "HOMEBOX_API_KEY": "${HOMEBOX_API_KEY}",
+        "AGENT_LOG_MODE": "${AGENT_LOG_MODE:-changes}",
+        "AGENT_FEEDBACK": "${AGENT_FEEDBACK:-on}",
+        "AGENT_LOG_DIR": "${AGENT_LOG_DIR:-/root/.claude/homebox-agent}"
       }
     }
   }

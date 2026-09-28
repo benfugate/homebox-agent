@@ -1,12 +1,8 @@
-"""End-to-end check of every tool against a real Homebox.
-
-Everything happens under a throwaway top-level location that is deleted at the
-end, even if a check fails. Needs HOMEBOX_URL and HOMEBOX_API_KEY.
-
-    uv run --with-requirements requirements.txt tests/test_live.py
-"""
+"""Every tool against a real Homebox, inside a throwaway location that is deleted afterwards."""
 
 import asyncio
+import json
+import os
 import re
 import secrets
 import struct
@@ -15,6 +11,8 @@ import tempfile
 import zlib
 from pathlib import Path
 
+os.environ["AGENT_LOG_DIR"] = LOG_DIR = tempfile.mkdtemp(prefix="homebox-agent-logs-")
+os.environ["AGENT_LOG_MODE"] = "changes"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import homebox_mcp  # noqa: E402
@@ -36,7 +34,7 @@ def tiny_png(path: Path) -> None:
     def chunk(kind: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
 
-    raw = b"\x00\xff\x00\x00"  # one red pixel
+    raw = b"\x00\xff\x00\x00"
     path.write_bytes(
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
@@ -47,7 +45,7 @@ def tiny_png(path: Path) -> None:
 
 async def main() -> None:
     root_name = f"zz-agent-test-{secrets.token_hex(3)}"
-    created: list[str] = []  # entity ids, deleted in reverse at the end
+    created: list[str] = []
 
     async with Client(homebox_mcp.mcp) as c:
 
@@ -117,7 +115,6 @@ async def main() -> None:
                 text,
             )
 
-            # Fields only the Homebox UI sets must survive the agent's full-replace update.
             api = homebox_mcp._api
             cur = api("GET", f"/entities/{lights}")
             tag = next(iter(api("GET", "/tags") or []), None)
@@ -178,6 +175,20 @@ async def main() -> None:
                     print(f"cleanup: {text}")
             text, _ = await call("find_items", query=root_name)
             check("Nothing matches" in text, "cleanup removed every test entity", text)
+
+    audit_file = Path(LOG_DIR) / "audit.jsonl"
+    audit = [json.loads(line) for line in audit_file.read_text().splitlines()] if audit_file.exists() else []
+    logged_ok = {a["tool"] for a in audit if a["ok"]}
+    check(logged_ok == {"create_location", "add_items", "update_item", "move", "attach_photo", "delete"},
+          "audit (changes mode) records every kind of change", str(sorted(logged_ok)))
+    check(not logged_ok & {"list_locations", "find_items", "location_contents", "get_details"},
+          "successful reads stay out of the audit")
+    failed = [a["tool"] for a in audit if not a["ok"]]
+    check({"move", "attach_photo", "delete", "get_details"} <= set(failed),
+          "refused calls are in the audit as failures", str(failed))
+    adds = [a for a in audit if a["tool"] == "add_items" and a["ok"]]
+    check(adds and adds[0]["args"]["items"][2]["name"] == "Wreath" and "Added to" in adds[0]["result"],
+          "audit keeps the items and Homebox's answer", json.dumps(adds[:1])[:300])
 
     print(f"\n{'ALL PASSED' if not failures else f'{len(failures)} FAILED: ' + ', '.join(failures)}")
     sys.exit(1 if failures else 0)
