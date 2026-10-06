@@ -1,4 +1,4 @@
-FROM ghcr.io/benfugate/claude-hermes-container:latest@sha256:be9a3b2782ff84a72369207c2283ad500d7d0aad146487a57e80156eeee490e6
+FROM ghcr.io/benfugate/claude-hermes-container:latest@sha256:2b5a613640ad1899f7d9f1a3c55f410e1ffaae91688dab828b34fbcf94b1e966
 
 # uv's cache and managed Pythons point into the /root/.claude volume, which build steps can't write to.
 COPY requirements.txt /opt/homebox-agent/requirements.txt
