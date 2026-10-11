@@ -3,10 +3,13 @@
 import asyncio
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 os.environ.setdefault("HOMEBOX_URL", "http://127.0.0.1:9")
 os.environ.setdefault("HOMEBOX_API_KEY", "offline-test")
@@ -16,6 +19,7 @@ os.environ.pop("AGENT_FEEDBACK", None)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import homebox_mcp  # noqa: E402
+import session_reset  # noqa: E402
 from mcp import Client  # noqa: E402
 
 EXPECTED_TOOLS = {
@@ -102,6 +106,35 @@ async def main() -> int:
     proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
     check("record_feedback" not in proc.stdout and "list_locations" in proc.stdout,
           "AGENT_FEEDBACK=off removes record_feedback", (proc.stdout + proc.stderr)[-500:])
+
+    db_path = str(Path(LOG_DIR) / "state.db")
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE sessions (key TEXT, claude_session_id TEXT, turn_count INTEGER, compact_warned INTEGER)")
+        db.executemany("INSERT INTO sessions VALUES (?, ?, ?, ?)",
+                       [("a", "s1", 5, 1), ("b", None, 0, 0), ("c", "s2", 2, 0)])
+    check(session_reset.reset_sessions(db_path) == 2, "session reset counts the active conversations")
+    with sqlite3.connect(db_path) as db:
+        rows = db.execute("SELECT claude_session_id, turn_count, compact_warned FROM sessions").fetchall()
+    check(rows == [(None, 0, 0)] * 3, "session reset clears every session like /reset", repr(rows))
+    missing = str(Path(LOG_DIR) / "missing.db")
+    try:
+        session_reset.reset_sessions(missing)
+        check(False, "session reset fails on a missing state.db")
+    except sqlite3.Error:
+        check(not Path(missing).exists(), "session reset never creates state.db")
+
+    check(all(session_reset.valid(e) for e in ("0 4 * * *", "*/30 * * * 1-5", "off")),
+          "valid SESSION_RESET_CRON values are accepted")
+    check(not any(session_reset.valid(e) for e in ("", "4am", "0 4 * *", "0 4 * * * *", "61 4 * * *")),
+          "invalid SESSION_RESET_CRON values are rejected")
+    ny = ZoneInfo("America/New_York")
+    due = session_reset.next_fire("0 4 * * *", datetime(2026, 11, 1, 1, 0, tzinfo=ny))
+    check((due.hour, due.day, due.utcoffset().total_seconds()) == (4, 1, -5 * 3600),
+          "next reset is 04:00 local time across a DST change", repr(due))
+    env = {**os.environ, "SESSION_RESET_CRON": "nonsense"}
+    proc = subprocess.run([sys.executable, session_reset.__file__], env=env, capture_output=True, text=True, timeout=30)
+    check(proc.returncode == 1 and "won't be reset" in proc.stdout,
+          "an invalid SESSION_RESET_CRON is logged and the scheduler stops", proc.stdout + proc.stderr)
 
     print("ALL PASSED" if not failures else f"{failures} FAILED")
     return 1 if failures else 0

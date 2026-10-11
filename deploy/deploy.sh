@@ -14,6 +14,7 @@ TZ=${TZ:-UTC}
 AGENT_LOG_MODE=${AGENT_LOG_MODE:-changes}
 AGENT_FEEDBACK=${AGENT_FEEDBACK:-on}
 TRANSCRIPT_RETENTION_DAYS=${TRANSCRIPT_RETENTION_DAYS:-365}
+SESSION_RESET_CRON=${SESSION_RESET_CRON:-0 4 * * *}
 IMAGE=${IMAGE:-ghcr.io/benfugate/homebox-agent:latest}
 TEMPLATE=/boot/config/plugins/dockerMan/templates-user/my-$NAME.xml
 ICON=https://cdn.jsdelivr.net/gh/selfhst/icons/png/homebox.png
@@ -29,6 +30,7 @@ sed -E \
     -e "s#(Target=\"AGENT_LOG_MODE\"[^>]*>)[^<]*<#\1$AGENT_LOG_MODE<#" \
     -e "s#(Target=\"AGENT_FEEDBACK\"[^>]*>)[^<]*<#\1$AGENT_FEEDBACK<#" \
     -e "s#(Target=\"TRANSCRIPT_RETENTION_DAYS\"[^>]*>)[^<]*<#\1$TRANSCRIPT_RETENTION_DAYS<#" \
+    -e "s#(Target=\"SESSION_RESET_CRON\"[^>]*>)[^<]*<#\1$SESSION_RESET_CRON<#" \
     deploy/my-homebox-agent.xml | remote "cat > $TEMPLATE"
 
 echo "==> pulling $IMAGE"
@@ -40,7 +42,7 @@ remote "docker run -d --name $NAME --net bridge --restart unless-stopped \
     -e TZ=$TZ -e IS_SANDBOX=1 \
     -e HOMEBOX_URL=$HOMEBOX_URL -e HOMEBOX_API_KEY=$HOMEBOX_API_KEY \
     -e AGENT_LOG_MODE=$AGENT_LOG_MODE -e AGENT_FEEDBACK=$AGENT_FEEDBACK \
-    -e TRANSCRIPT_RETENTION_DAYS=$TRANSCRIPT_RETENTION_DAYS \
+    -e TRANSCRIPT_RETENTION_DAYS=$TRANSCRIPT_RETENTION_DAYS -e \"SESSION_RESET_CRON=$SESSION_RESET_CRON\" \
     -l net.unraid.docker.managed=dockerman -l net.unraid.docker.icon=$ICON \
     -v $DATA:/root/.claude:rw \
     $IMAGE >/dev/null"

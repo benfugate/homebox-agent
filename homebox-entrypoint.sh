@@ -23,6 +23,11 @@ if [ ! -f "$STATE/hermes/settings.json" ]; then
     install -m 600 "$AGENT/hermes-settings.json" "$STATE/hermes/settings.json"
 fi
 
+# Clears the Discord conversations on SESSION_RESET_CRON (default 04:00); output goes to the container log.
+if [ "${SESSION_RESET_CRON:-}" != "off" ]; then
+    "$AGENT/.venv/bin/python" "$AGENT/session_reset.py" &
+fi
+
 # A pid file left by an unclean stop always says 1, which is this process, so hermes would refuse to start.
 rm -f "$STATE/hermes/daemon.pid"
 
